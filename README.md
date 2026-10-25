@@ -72,11 +72,22 @@ Or use the installed script:
 .venv/bin/{{AGENT_NAME}}-daemon
 ```
 
-Connect via the CLI adapter (separate terminal):
+Connect the CLI client (separate terminal). It reads the same config as the
+daemon to find the socket, so no arguments are needed:
 
 ```bash
-.venv/bin/python -m agent_core.adapters.cli
+.venv/bin/python -m {{agent_pkg}}.cli
 ```
+
+Or use the installed script:
+
+```bash
+.venv/bin/{{AGENT_NAME}}-cli
+```
+
+The client lives in `{{agent_pkg}}/cli.py` — a thin wrapper around
+`agent_core.adapters.cli.run_repl` with a minimal `Renderer`. Edit its
+`Renderer.format_message` to render any agent-specific message types you add.
 
 ## Smoke Test
 
@@ -84,15 +95,33 @@ Connect via the CLI adapter (separate terminal):
 .venv/bin/pytest tests/ -v
 ```
 
-Expected: 3 tests pass (import, instantiation, command registration).
+Expected: 4 tests pass (import, instantiation, command registration, CLI client wiring).
 
 ## Discord (optional)
 
-Discord is not wired by default. To opt in:
+Discord is not wired by default. The Discord adapter is a **client** of the
+daemon — a separate process (like the CLI) that connects over the daemon's
+socket. `agent_core.adapters.discord_gateway` ships composition helpers, not a
+bot class or a `run_daemon` gateway: you bring your own `discord.Client`
+subclass. To opt in:
 
-1. Add `agent_core[discord]` to `dependencies` in `pyproject.toml`.
-2. In `{{agent_pkg}}/__main__.py`, instantiate the gateway and pass it to
-   `run_daemon` (see `agent_core.adapters.discord_gateway` for the API).
+1. Fold the `discord` extra into the `agent_core` dependency in
+   `pyproject.toml` (it's a git-URL dependency, so the extra goes on that line):
+
+   ```toml
+   "agent_core[discord] @ git+https://github.com/EdibleTuber/agent_core.git@v1.12.1",
+   ```
+
+2. Add a Discord bot module (e.g. `{{agent_pkg}}/discord_bot.py`) with a
+   `discord.Client` subclass that bridges Discord to the running daemon using
+   the helpers in `agent_core.adapters.discord_gateway`:
+   - `UserConnectionManager` — per-user `DaemonConnection`s to the socket
+   - `parse_discord_message` — split `!cmd` vs chat intents
+   - `rewrite_slash_prefixes` — translate `/cmd` → `!cmd`
+   - `format_tool_progress`, `split_message` — Discord formatting
+
+3. Run the bot as its own process alongside the daemon (it connects as a
+   client; it is **not** passed to `run_daemon`).
 
 ## Systemd Setup
 
@@ -105,8 +134,8 @@ systemctl --user daemon-reload
 systemctl --user enable --now {{AGENT_NAME}}-daemon
 ```
 
-For a CLI service that stays running, use `agent_core.adapters.cli` as the
-ExecStart target (no template provided; the CLI is typically run interactively).
+The CLI client (`{{agent_pkg}}.cli`) is typically run interactively rather than
+as a service, so no unit file is provided for it.
 
 ---
 
@@ -116,6 +145,7 @@ ExecStart target (no template provided; the CLI is typically run interactively).
 {{agent_pkg}}/
     agent.py         {{AGENT_CLASS}} — your Agent subclass; add commands + tools here
     __main__.py      python -m {{agent_pkg}} entry point (calls run_daemon)
+    cli.py           terminal REPL client; python -m {{agent_pkg}}.cli
     prompts/
         system.md    system prompt — edit to define your agent's identity
     commands/
@@ -133,6 +163,14 @@ ExecStart target (no template provided; the CLI is typically run interactively).
 | `{{AGENT_CLASS}}.disabled_builtins` | Remove built-in commands/tools by name |
 | `{{AGENT_CLASS}}.setup()` | Construct domain resources after framework managers are ready |
 | `{{AGENT_CLASS}}.system_prompt(ctx)` | Build the per-turn system prompt |
+| `{{AGENT_CLASS}}.handle_command(msg, ctx)` | Dispatch slash-commands (wired to the registry by default) |
+| `{{AGENT_CLASS}}.handle_chat(msg, ctx)` | Per-turn chat loop (minimal text-only streaming by default; extend for tools) |
 | `{{AGENT_CLASS}}.decide_mode(conversation)` | Override reasoning-mode logic |
+
+> The scaffold ships working `handle_command` and `handle_chat`
+> implementations in `agent.py`. The chat loop is text-only: it streams a
+> single model completion and does **not** execute tool calls. To run tools,
+> register `Tool` subclasses on `tools` and extend the `list[ToolCall]` branch
+> in `handle_chat` to dispatch through `self.tool_executor`.
 
 Full API docs: [agent_core](https://github.com/EdibleTuber/agent_core)

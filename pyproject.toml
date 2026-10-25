@@ -8,11 +8,12 @@ version = "0.1.0"
 description = "{{AGENT_DESCRIPTION}}"
 requires-python = ">=3.12"
 dependencies = [
-    "agent_core @ git+https://github.com/EdibleTuber/agent_core.git@v0.7.0",
+    "agent_core @ git+https://github.com/EdibleTuber/agent_core.git@v1.12.1",
 ]
 
 [project.scripts]
 {{AGENT_NAME}}-daemon = "{{agent_pkg}}.__main__:main"
+{{AGENT_NAME}}-cli = "{{agent_pkg}}.cli:main"
 
 [project.optional-dependencies]
 dev = [
